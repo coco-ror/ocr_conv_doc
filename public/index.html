@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <title>OCR Recognition</title>
+
+    <!-- Bootstrap core CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.3/css/bootstrap.min.css" integrity="sha384-Zug+QiDoJOrZ5t4lssLdxGhVrurbmBWopoEl+M6BdEfwnCJZtKxi1KgxUyJq13dy" crossorigin="anonymous">
+
+    <!-- Custom styles -->
+    <link href="../dist/css/jquery.dm-uploader.min.css" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+
+    <style>
+      .panel-lang {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+    </style>
+  </head>
+
+  <body>
+
+    <main role="main" class="container">
+
+      <h1>Convert PDF/Images to Text</h1>
+
+      <div class="row">
+        <div class="col-md-5 col-sm-12">
+          
+          <!-- Our markup, the important part here! -->
+          <div id="drag-and-drop-zone" class="dm-uploader p-5">
+            <h3 class="mb-5 mt-5 text-muted">Drag &amp; drop files here</h3>
+
+            <div class="btn btn-primary btn-block mb-5">
+                <span>Open the file Browser</span>
+                <input id="input_upload" onchange="compressFile()" type="file" title='Click to add Files'/>
+            </div>
+          </div><!-- /uploader -->
+
+        </div>
+        <div class="panel-lang col-md-2 col-sm-12">
+          <p>Select Language</p>
+          <select id="select_lang" class="form-control">
+            <option value="ee">Ewe</option>
+            <option value="gaa">Ga</option>
+            <option value="ada">Adangme</option>
+            <option value="ak">Fante</option>
+          </select>
+        </div>
+        <div class="col-md-5 col-sm-12">
+          <div class="card h-100">
+            <div class="card-header">
+              File List
+            </div>
+
+            <ul class="list-unstyled p-2 d-flex flex-column col" id="files">
+              <li class="text-muted text-center empty">No files uploaded.</li>
+            </ul>
+          </div>
+        </div>
+      </div><!-- /file list -->
+
+      <div id="alert_msg" class="alert alert-info" role="alert">
+        
+      </div>
+
+      <div class="row">
+        <div class="col-12">
+           <div class="card h-100">
+            <div class="card-header">
+              Status Messages
+            </div>
+
+            <ul class="list-group list-group-flush" id="debug">
+              <li class="list-group-item text-muted empty">Ready plugin....</li>
+            </ul>
+          </div>
+        </div>
+      </div> <!-- /debug -->
+
+    </main> <!-- /container -->
+
+    <canvas id="pdf-canvas" width="800"></canvas>
+    <input id = "uploader-name" type="hidden" />
+
+    <footer class="text-center">
+        <p>&copy; Copyright 2019</p>
+    </footer>
+
+    <script src="https://code.jquery.com/jquery-3.2.1.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.3/js/bootstrap.min.js" integrity="sha384-a5N7Y/aK3qNeh15eJKGWxsqtnX/wWdSZSKp+81YjTmS15nvnvxKHuzaWwXHDli+4" crossorigin="anonymous"></script>
+
+    <script src="../dist/js/jquery.dm-uploader.min.js"></script>
+    <script src="demo-ui.js"></script>
+    <script src="demo-config.js"></script>
+    <script src="pdf.js"></script>
+    <script src="pdf.worker.js"></script>
+
+    <!-- File item template -->
+    <script type="text/html" id="files-template">
+      <li class="media">
+        <div class="media-body mb-1">
+          <p class="mb-2">
+            <strong>%%filename%%</strong> - Status: <span class="text-muted">Waiting</span>
+          </p>
+          <div class="progress mb-2">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" 
+              role="progressbar"
+              style="width: 0%" 
+              aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+            </div>
+          </div>
+          <hr class="mt-1 mb-1" />
+        </div>
+      </li>
+    </script>
+
+    <!-- Debug item template -->
+    <script type="text/html" id="debug-template">
+      <li class="list-group-item text-%%color%%">
+        <strong>%%date%%</strong>: %%message%%
+        <input id="uploaded_path" class="upload-path" type="hidden" value="%%path%%">
+      </li>
+    </script>
+
+    <script type="text/javascript">
+      //============== module for process pdf =================
+      var __API_KEY = "fcde222a1088957";
+      var __GOOGLE_API_KEY = "AIzaSyDphPwczZfQJcx5Szwh9X2r67RoV2hQJLI";
+      var __PDF_DOC,
+          __CURRENT_PAGE,
+          __TOTAL_PAGES,
+          __PAGE_RENDERING_IN_PROGRESS = 0,
+          __CANVAS = $('#pdf-canvas').get(0),
+          __CANVAS_CTX = __CANVAS.getContext('2d');
+
+      function processPDF(pdf_url) {
+        
+        PDFJS.getDocument({ url: pdf_url }).then(function(pdf_doc) {
+          __PDF_DOC = pdf_doc;
+          __TOTAL_PAGES = __PDF_DOC.numPages;
+          
+          // Show the first page
+          extractPage(1);
+          
+        }).catch(function(error) {
+          // If error re-show the upload button
+          alert(error.message);
+        });;
+      }
+
+      function extractPage(page_no) {
+        __PAGE_RENDERING_IN_PROGRESS = 1;
+        __CURRENT_PAGE = page_no;
+        
+        // Fetch the page
+        __PDF_DOC.getPage(page_no).then(function(page) {
+          // As the canvas is of a fixed width we need to set the scale of the viewport accordingly
+          var scale_required = __CANVAS.width / page.getViewport(1).width;
+
+          // Get viewport of the page at required scale
+          var viewport = page.getViewport(scale_required);
+
+          // Set canvas height
+          __CANVAS.height = viewport.height;
+
+          var renderContext = {
+            canvasContext: __CANVAS_CTX,
+            viewport: viewport
+          };
+          
+          // Render the page contents in the canvas
+          page.render(renderContext).then(function() {
+            __PAGE_RENDERING_IN_PROGRESS = 0;
+          });
+        });
+
+        setTimeout(function() {
+          getGoogleVision(__CANVAS.toDataURL(), page_no);
+        }, 5000);
+      }
+
+      // ================ module for process image ======================
+      var fileReader = new FileReader();
+
+      function getBase64Image(url, callback) {
+        var httpRequest = new XMLHttpRequest();
+        httpRequest.onload = function() {
+            var fileReader = new FileReader();
+              fileReader.onloadend = function() {
+                  callback(fileReader.result);
+              }
+              fileReader.readAsDataURL(httpRequest.response);
+        };
+        httpRequest.open('GET', url);
+        httpRequest.responseType = 'blob';
+        httpRequest.send();
+      }
+
+      fileReader.onload = function (event) {
+        var image = new Image();
+        
+        image.onload=function(){
+            var canvas=document.createElement("canvas");
+            var context=canvas.getContext("2d");
+            
+            rate_width = parseInt(image.width / 1000) + 1
+            rate_height = parseInt(image.height / 1000) + 1
+            canvas.width=image.width/Math.max(rate_width, rate_height);
+            canvas.height=image.height/Math.max(rate_width, rate_height);
+            
+            context.drawImage(image, 0, 0, image.width, image.height, 0, 0, canvas.width, canvas.height);
+
+            getBase64Image(canvas.toDataURL(), function(dataUrl) {
+              getGoogleVision(dataUrl);
+            });
+        }
+        image.src=event.target.result;
+      };
+
+      function getGoogleVision(dataUrl, cnt_page = 0) {
+        var content_json_obj = {'content': dataUrl.replace(/^data:image\/(png|jpg|gif|PNG|JPG|GIF);base64,/, '')};
+        var feature_json_arr = [{'type': 'TEXT_DETECTION'}, {'type': 'DOCUMENT_TEXT_DETECTION'}];
+        var lang_hints = ['ee', 'gaa', 'ada', 'ak'];
+        var request_list = {'features': feature_json_arr, 'image': content_json_obj, 'imageContext': {'languageHints': lang_hints}};
+        var data = {'requests': [request_list]};
+
+        $.ajax({
+          url: "https://vision.googleapis.com/v1/images:annotate?key=" + __GOOGLE_API_KEY,
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          data: JSON.stringify(data),
+          type: 'POST',
+          success: function (response) { 
+            response = response['responses'][0]['textAnnotations'];
+            response_text = response[0]['description'];
+            
+            file_name = $("#uploader-name").val();
+            if(cnt_page == 0) {
+              saveTextAsFile($("#select_lang").val() + "_" + file_name.substring(0, file_name.length - 4), response_text);
+              $("#alert_msg").text("Successfully converted!");
+            }else {
+              saveTextAsFile($("#select_lang").val() + "_" + file_name.substring(0, file_name.length - 4) + "_Page" + cnt_page, response_text);
+              if(cnt_page >= __TOTAL_PAGES) {
+                $("#alert_msg").text("Successfully converted!");
+                $("#alert_msg").show();
+                return;
+              }
+              extractPage(cnt_page + 1);
+            }
+          }
+        });
+      }
+
+      function getResponse(dataUrl, cnt_page=0) {
+        $("#alert_msg").hide();
+        var formData = new FormData();
+        formData.append("base64image", dataUrl);
+        formData.append("apikey"  , __API_KEY);
+        formData.append("isOverlayRequired", false);
+
+        //Send OCR Parsing request asynchronously
+        $.ajax({
+          url: "https://api.ocr.space/parse/image",
+          data: formData,
+          dataType: 'json',
+          cache: false,
+          contentType: false,
+          processData: false,
+          type: 'POST',
+          success: function (ocrParsedResult) {
+            //Get the parsed results, exit code and error message and details
+            response_result = ocrParsedResult["ParsedResults"];
+            response_text = "";
+
+            if (typeof response_result === 'undefined') {
+              error_msg = ocrParsedResult["ErrorMessage"][0];
+              $("#alert_msg").text(error_msg);
+              $("#alert_msg").show();
+              return;
+            }
+
+            response = ocrParsedResult["ParsedResults"];
+            for (var page = 0; page < response.length; page ++) {
+              response_text += response[page]["ParsedText"] + "\n";
+            }
+
+            file_name = $("#uploader-name").val();
+            if(cnt_page == 0) {
+              saveTextAsFile($("#select_lang").val() + "_" + file_name.substring(0, file_name.length - 4), response_text);
+              $("#alert_msg").text("Successfully converted!");
+            }else {
+              saveTextAsFile($("#select_lang").val() + "_" + file_name.substring(0, file_name.length - 4) + "_Page" + cnt_page, response_text);
+              
+              if(cnt_page >= __TOTAL_PAGES) {
+                $("#alert_msg").text("Successfully converted!");
+                $("#alert_msg").show();
+                return;
+              }
+              extractPage(cnt_page + 1);
+            }
+            
+          }
+        });
+      }
+
+      function saveTextAsFile(file_name, response_text)
+      {
+        var fileNameToSaveAs = file_name + ".txt";
+
+        var textFileAsBlob = new Blob([response_text], {type:'text/plain'}); 
+        var downloadLink = document.createElement("a");
+        downloadLink.download = fileNameToSaveAs;
+        downloadLink.innerHTML = "Download";
+        if (window.webkitURL != null)
+        {
+          // Chrome allows the link to be clicked
+          // without actually adding it to the DOM.
+          downloadLink.href = window.webkitURL.createObjectURL(textFileAsBlob);
+        }
+        else
+        {
+          // Firefox requires the link to be added to the DOM
+          // before it can be clicked.
+          downloadLink.href = window.URL.createObjectURL(textFileAsBlob);
+          downloadLink.onclick = destroyClickedElement;
+          downloadLink.style.display = "none";
+          document.body.appendChild(downloadLink);
+        }
+      
+        downloadLink.click();  
+      }
+
+      function compressFile() {
+        file_list = $("#input_upload").get(0).files;
+
+        for(var index = 0; index < file_list.length; index ++) {
+          var uploadFile = file_list[index];
+          $("#uploader-name").val(uploadFile.name);
+          // Validate whether PDF
+          if(uploadFile.type.indexOf('image/') > -1) {
+
+              fileReader.readAsDataURL(uploadFile);
+
+          } else if(uploadFile.type.indexOf('application/pdf') > -1) {
+
+            processPDF(URL.createObjectURL(uploadFile));
+
+          } else {
+            alert('Invalid file type');
+            return;
+          }
+        }
+      }
+
+      $(document).ready(function(){
+        $('#pdf-canvas').hide();
+        $("#alert_msg").hide();
+        
+        $("#input_upload").click(function(){
+          $(this).removeAttr('multiple');
+        });
+      });
+    </script>
+  </body>
+</html>
